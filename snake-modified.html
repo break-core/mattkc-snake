@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+    #g {
+        background: black;
+        margin: auto;
+        display: block;
+    }
+</style>
+</head>
+<body>
+    <canvas id="g" width="640px" height="480px">
+    </canvas>
+</body>
+<script>
+    const area_w = 640;
+    const area_h = 480;
+    const tile_sz = 40;
+    const area_tile_w = area_w / tile_sz;
+    const area_tile_h = area_h / tile_sz;
+    const padding = tile_sz / 4;
+    const food_padding = tile_sz / 8;
+    const max_snake = area_tile_w * area_tile_h;
+
+    // Constants based on keycodes from keydown event
+    const D_UP = 38;
+    const D_DOWN = 40;
+    const D_LEFT = 37;
+    const D_RIGHT = 39;
+
+    var canvas = document.getElementById("g");
+    var ctx = canvas.getContext("2d");
+
+    var phys_timer = null;
+
+    var dir = 0;
+    var started = false;
+
+    var pos = [ {x: Math.round(area_tile_w/2), y: Math.round(area_tile_h/2)} ];
+
+    var food = null;
+
+    var ctrl_stack = [];
+
+    var forgive = false;
+
+    function pos_equal(p1, p2) {
+        return p1.x == p2.x && p1.y == p2.y;
+    }
+
+    function place_food() {
+        var body_here;
+
+        do {
+            food = {x: Math.floor(Math.random() * area_tile_w), y: Math.floor(Math.random() * area_tile_h)};
+
+            body_here = false;
+
+            for (var i=0;i<pos.length;i++) {
+                if (pos_equal(pos[i], food)) {
+                    body_here = true;
+                    break;
+                }
+            }
+        } while (body_here);
+    }
+
+    function draw_internal() {
+        ctx.clearRect(0, 0, area_w, area_h);
+
+        ctx.fillStyle = "white";
+
+        if (pos.length > 1) {
+            for (var i=1;i<pos.length;i++) {
+                var current = pos[i];
+                var previous = pos[i-1];
+
+                var left = Math.min(current.x, previous.x);
+                var right = Math.max(current.x, previous.x);
+                var top = Math.min(current.y, previous.y);
+                var bottom = Math.max(current.y, previous.y);
+
+                var x = left*tile_sz + padding;
+                var y = top*tile_sz + padding;
+                var w = (1+right-left)*tile_sz - 2*padding;
+                var h = (1+bottom-top)*tile_sz - 2*padding;
+
+                if (left == 0 && right == area_tile_w-1) {
+                    // Exception for wrapping around the X axis
+                    ctx.fillRect(0, y, tile_sz - padding, h);
+                    ctx.fillRect(area_w-tile_sz+padding, y, tile_sz - padding, h);
+                } else if (top == 0 && bottom == area_tile_h-1) {
+                    // Exception for wrapping around the Y axis
+                    ctx.fillRect(x, 0, w, tile_sz - padding);
+                    ctx.fillRect(x, area_h-tile_sz+padding, w, tile_sz - padding);
+                } else {
+                    // Draw a long rectangle from the previous position to this one
+                    ctx.fillRect(x, y, w, h);
+                }
+            }
+        } else {
+            // Just draw single square
+            var p = pos[0];
+            ctx.fillRect(
+                p.x*tile_sz + padding,
+                p.y*tile_sz + padding,
+                tile_sz - 2*padding,
+                tile_sz - 2*padding);
+        }
+
+        if (food) {
+            ctx.fillStyle = "lime";
+            ctx.fillRect(
+                food.x*tile_sz+food_padding,
+                food.y*tile_sz+food_padding,
+                tile_sz-2*food_padding,
+                tile_sz-2*food_padding);
+        }
+    }
+
+    function draw_loop() {
+        draw_internal();
+
+        if (started) {
+            window.requestAnimationFrame(draw_loop);
+        }
+    }
+
+    function end_game(msg) {
+        stop_physics();
+
+        setTimeout(function(){
+            alert(msg);
+        }, 250);
+    }
+
+    function physics_loop() {
+        var current = Object.assign({}, pos[pos.length-1]);
+
+        // Process dir stack
+        while (ctrl_stack.length > 0) {
+            // Pop dir change
+            var next_dir = ctrl_stack[0];
+            ctrl_stack.shift();
+
+            if (!dir_is_opposing(dir, next_dir)) {
+                dir = next_dir;
+                break;
+            }
+        }
+
+        // Move player
+        switch (dir) {
+        case D_UP:
+            current.y--;
+            break;
+        case D_DOWN:
+            current.y++
+            break;
+        case D_LEFT:
+            current.x--;
+            break;
+        case D_RIGHT:
+            current.x++;
+            break;
+        }
+
+        if (current.x < 0) {
+            current.x = area_tile_w-1;
+        } else if (current.x >= area_tile_w) {
+            current.x = 0;
+        }
+
+        if (current.y < 0) {
+            current.y = area_tile_h-1;
+        } else if (current.y >= area_tile_h) {
+            current.y = 0;
+        }
+
+        var eaten_self = false;
+        var eaten_food = pos_equal(current, food);
+
+        if (!eaten_food) {
+            // Check if we bit ourselves
+            for (var i=1;i<pos.length;i++) {
+                if (pos_equal(pos[i], current)) {
+                    eaten_self = true;
+                    break;
+                }
+            }
+
+            if (eaten_self) {
+                if (forgive) {
+                    end_game("Game over!");
+                } else {
+                    forgive = true;
+                }
+            }
+        }
+
+        if (!eaten_self) {
+            if (!eaten_food) {
+                // Pop top tail position
+                pos.shift();
+            }
+
+            // Push this tail position
+            pos.push(current);
+
+            if (eaten_food) {
+                if (pos.length == max_snake) {
+                    food = null;
+                    end_game("YOU'RE WINNER !");
+                } else {
+                    // Ate this food
+                    place_food();
+                }
+            }
+
+            forgive = false;
+        }
+    }
+
+    function stop_physics() {
+        clearInterval(phys_timer);
+    }
+
+    function start_game() {
+        phys_timer = setInterval(physics_loop, 150);
+
+        window.requestAnimationFrame(draw_loop);
+    }
+
+    function dir_is_opposing(dir1, dir2) {
+        return (dir1 == D_DOWN && dir2 == D_UP)
+                || (dir2 == D_DOWN && dir1 == D_UP)
+                || (dir1 == D_LEFT && dir2 == D_RIGHT)
+                || (dir2 == D_LEFT && dir1 == D_RIGHT);
+    }
+
+    document.addEventListener('keydown', function(e){
+        // Sets direction if valid, otherwise ignores
+        switch (e.keyCode) {
+        case D_UP:
+        case D_LEFT:
+        case D_RIGHT:
+        case D_DOWN:
+            ctrl_stack.push(e.keyCode);
+            break;
+        case 80: // P for pause
+            if (started) {
+                started = false;  // Stops draw loop
+                stop_physics();   // Stops physics timer
+                ctrl_stack = [];  // Prevents if statement below triggering
+            }
+            break;
+        }
+
+        // Start game if it hasn't started already
+        if (!started && ctrl_stack.length > 0) {
+            started = true;
+            start_game();
+        }
+    });
+
+    // Start with something on the screen
+    place_food();
+    draw_internal();
+</script>
+</html>
